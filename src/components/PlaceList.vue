@@ -15,10 +15,16 @@
         </div>
       </li>
     </ul>
+    <!-- <div class="zwsx" v-show="leftInfo.length == 0">
+      <el-image
+        style="width: 440px; height: 500px"
+      ></el-image>
+      <div>暂无事项</div>
+    </div> -->
   </div>
 </template>
 <script>
-import { requestJPAAS } from "@/tools/request";
+import { getBranchDetail } from "@/tools/zwdt";
 
 export default {
   name: "PlaceList",
@@ -34,18 +40,7 @@ export default {
   mounted() {},
   methods: {
     async getBranchDetails(item) {
-      let params = {
-        app_id: "jmapnzyyagupv",
-        interface_id: "yzzwbzwdtxxxx",
-        params: {
-          placeId: item.iid,
-          placeType: item.infoType,
-          lat: item.lat,
-          lng: item.lng,
-        },
-      };
-      let res = await requestJPAAS(params);
-      let info = res.data;
+      let info = await getBranchDetail(item);
       if (info.code == 200 && info.success) {
         this.branchDetails = JSON.parse(info.data).data.centerEntity;
       }
@@ -54,7 +49,6 @@ export default {
       this.tdtMap.panTo(postion, 15);
     },
   },
-  created() {},
 };
 </script>
 

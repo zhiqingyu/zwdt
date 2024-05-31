@@ -5,12 +5,40 @@
     <!-- 左侧nav导航栏card -->
     <transition name="fade">
       <el-card class="box-card left_card">
-        <Search @search="handlesearch" />
+        <Search
+          @search="handlesearch"
+          @goBackHome="ongoHome"
+          :isSearchPage="isSearchPage"
+        />
         <div class="bsdtlist_header" v-show="!isSearchPage">
+          <div class="bsdtList_top">
+            <el-button
+              style="width: 147px"
+              type="primary"
+              :plain="true"
+              size="small "
+              @click="openxzqhMc"
+              >区域:<span v-show="activeQx.title">:</span
+              >{{ activeQx.title ? activeQx.title : "绵阳市" }}</el-button
+            >
+            <el-button
+              @click="openxzjlMc"
+              type="primary"
+              plain
+              size="small "
+              style="width: 147px"
+              >距离:{{
+                activeDistanceValue ? activeDistanceValue : "全部"
+              }}</el-button
+            >
+            <el-button plain size="small" @click="init()">重置</el-button>
+          </div>
           <div class="bsdt_title">
             <span class="bsdt_title_icon"></span
-            ><span class="hyy">为您展示附近的办事大厅</span>
-            <span class="qyxz" @click="openMc">区域选择 </span>
+            ><span class="hyy">为您展示您所选点位附近的办事网点</span>
+          </div>
+          <div class="dqzz" v-show="branchDetails.centerName">
+            <span>(当前定位：{{ branchDetails.centerName }})</span>
           </div>
           <!-- 左侧tab切换 -->
           <el-tabs
@@ -51,6 +79,10 @@
         <!-- 右侧头部 -->
         <div class="dt_detail_title">
           <span class="dt_card_name">{{ branchDetails.centerName }}</span>
+          <div class="dzlq" @click="goTdt">
+            <span class="dzlq_icon"></span>
+            <span>到这里去</span>
+          </div>
           <span class="cloes" @click="cloesDetail"></span>
         </div>
         <div class="dt_detail_content">
@@ -64,7 +96,7 @@
             >
               <img
                 class="dt_card_pic"
-                :src="`http://218.89.178.237:280${item.hosUrl}`"
+                :src="`https://218.89.178.237:6443${item.hosUrl}`"
               />
             </el-carousel-item>
           </el-carousel>
@@ -181,36 +213,67 @@
         </div>
         <el-image
           style="width: 440px; height: 513px; margin: 46px auto 100px"
-          :src="`http://218.89.178.237:280${rightPlaneList.hosUrl}`"
+          :src="`https://218.89.178.237:6443${rightPlaneList.hosUrl}`"
         ></el-image>
       </el-card>
     </transition>
     <transition name="fade">
-      <div class="mc" v-show="isShowMc">
+      <div class="mc" v-show="isShowxzqhMc">
         <div class="zxqh">
           <div class="dqxz_title">
             <span>请选择地区</span>
-            <span class="cloes" @click="cloesMc"></span>
+            <span class="cloes" @click="cloesxzqhMc"></span>
           </div>
           <ul class="qxlist">
-            <li @click="xzqh(item)" v-for="(item, index) in qh" :key="index">
+            <li
+              :class="{ active: activeDistrict === index }"
+              @click="xzqh(item, index)"
+              v-for="(item, index) in qh"
+              :key="index"
+            >
               {{ item.title }}
             </li>
           </ul>
-          <div class="xzqh">
-            <span class="xzqh_qxz">您选择的是:</span>
-            <span @click="gbqx(item)">{{ activeQx.title }}</span>
-          </div>
+          <div class="xzqh"></div>
           <button class="qr" @click="changeQh">确认</button>
+        </div>
+      </div>
+    </transition>
+    <transition name="fade">
+      <div class="mc" v-show="isShowxzjlMc">
+        <div class="zxjl">
+          <div class="dqxz_title">
+            <span>请选择距离</span>
+            <span class="cloes" @click="cloesxzjlMc"></span>
+          </div>
+          <ul class="jllist">
+            <li
+              :class="{ active: activeDisrance === index }"
+              @click="xzjl(item, index)"
+              v-for="(item, index) in distanceLists"
+              :key="index"
+            >
+              {{ item.value }}
+            </li>
+          </ul>
+          <div class="xzqh">
+            <span @click="gbjl(item)">{{ activeQx.title }}</span>
+          </div>
+          <button class="qr" @click="changeJl">确认</button>
         </div>
       </div>
     </transition>
   </div>
 </template>
 <script>
-import { Jpaas, requestJPAAS } from "@/tools/request";
 import Search from "@/components/Search";
 import PlaceList from "@/components/PlaceList";
+import {
+  getFirstConfig,
+  getBranchesList,
+  getDistrictList,
+  getBranchDetail,
+} from "@/tools/zwdt";
 
 export default {
   name: "TdtMap",
@@ -220,9 +283,6 @@ export default {
   },
   data() {
     return {
-      /**
-       * 地图相关
-       */
       //  初始化map
       tdtMap: {},
       // 经度
@@ -231,20 +291,14 @@ export default {
       wd: "31.47",
       // 区划列表
       qh: [],
+      // 场所列表
+      typeList: [],
       // 搜索关键字
       searchValue: "",
       // 当前选中分类
       activeName: "政务大厅",
       //左侧列表数据
       leftInfo: [],
-      // 类型list
-      typeList: [],
-      // 搜索类型
-      searchType: "place",
-      //  场所类型
-      infoType: "",
-      // 地区编码
-      provinceCode: "510700000000",
       // 大厅地图列表
       jwdArr: [],
       // 是否显右侧详情
@@ -278,8 +332,47 @@ export default {
       itemList: [],
       // 选中区县
       activeQx: "",
-      // 是否展示蒙层
-      isShowMc: false,
+      // 是否展示选择区划蒙层
+      isShowxzqhMc: false,
+      /*是否暂时选择距离蒙层 */
+      isShowxzjlMc: false,
+      activeDistanceValue: "",
+      /**
+       * 请求相关
+       */
+      options: {
+        searchType: "place",
+        infoType: "",
+        provinceCode: "510700000000",
+        lng: "104.74",
+        lat: "31.47",
+        infoName: "",
+        distance: "",
+      },
+      /**选中地区 */
+      activeDistrict: 0,
+      /**选中距离 */
+      activeDisrance: 0,
+      //选中地点
+      //距离lists
+      distanceLists: [
+        {
+          value: "全部",
+          distance: "",
+        },
+        {
+          value: "3km",
+          distance: "3000",
+        },
+        {
+          value: "5km",
+          distance: "5000",
+        },
+        {
+          value: "10km",
+          distance: "10000",
+        },
+      ],
     };
   },
   created() {},
@@ -292,114 +385,70 @@ export default {
   watch: {},
   methods: {
     //  初始化地图
-    initMap() {
-      //
+    initMap(jd, wd) {
       let zoom = 8;
       this.tdtMap = new T.Map("tdtMapDivID");
-      this.tdtMap.centerAndZoom(new T.LngLat(this.jd, this.wd), zoom);
-      var position = new T.LngLat(this.jd, this.wd);
+      this.tdtMap.centerAndZoom(new T.LngLat(jd, wd), zoom);
+      var position = new T.LngLat(jd, wd);
       var marker = new T.Marker(position);
       this.tdtMap.addOverLay(marker);
-      //  添加位置列表信息标注
     },
     /**
      * 首次进入获取配置
      */
     async getPZ() {
-      let params = {
-        app_id: "zwdtlzjmg",
-        interface_id: "yzzwbzwdtcxpzsjjk",
-        params: {},
-      };
-      let res = await requestJPAAS(params);
-      let info = res.data;
+      let info = await getFirstConfig();
       if (info.code == 200 && info.success) {
         let siteInfo = JSON.parse(info.data).data.serviceNavigation;
         siteInfo.forEach((item, index) => {
           item.index = index;
         });
         this.typeList = siteInfo;
-        this.infoType = siteInfo[0].classFlag;
+        this.options.infoType = siteInfo[0].classFlag;
       }
       this.getInfoList();
     },
-
     /**
      * 获取服务场所信息
      */
     async getInfoList() {
-      let params = {
-        app_id: "zwdtlzjmg",
-        interface_id: "yzzwbzwdtcsxxlb",
-        params: {
-          searchType: this.searchType,
-          infoType: this.infoType,
-          provinceCode: this.provinceCode,
-          pageSize: "100",
-          pageNo: "1",
-          lng: this.jd,
-          lat: this.wd,
-          infoName: this.infoName,
-        },
-      };
-      let res = await requestJPAAS(params);
-      let info = res.data;
-      if (this.searchType == "place") {
+      this.tdtMap.clearOverLays();
+      if (this.options.searchType == "place") {
+        let info = await getBranchesList(this.options);
         if (info.code == 200 && info.success) {
-          let jwdArr = [];
           this.leftInfo = JSON.parse(info.data).data.pageData.infoBeanList;
-          if (this.leftInfo != null && this.leftInfo.length > 0) {
-            this.leftInfo.forEach((item, index) => {
-              let jwdObj = {
-                lng: item.lng,
-                lat: item.lat,
-              };
-              jwdArr.push(jwdObj);
-            });
-            this.jwdArr = jwdArr;
-          }
-          this.jwdArr.forEach((item) => {
-            var position = new T.LngLat(item.lng, item.lat);
-            var marker = new T.Marker(position);
-            this.tdtMap.addOverLay(marker);
-          });
+          this.addLables();
         }
-      } else if (this.searchType == "item") {
-        this.searchType == "place";
+      } else if (this.options.searchType == "item") {
         this.$message("功能正在开发中");
+        this.options.searchType = "place";
       }
     },
     /**
      * 切换服务类型
      */
     handleChangeType(tab) {
-      this.activeName = tab.label;
-      this.tdtMap.clearOverLays();
       this.typeList.forEach((item) => {
         if (item.classificationName === this.activeName) {
-          this.infoType = item.classFlag;
+          this.options.infoType = item.classFlag;
         }
       });
       this.getInfoList();
+      // this.initMap(this.jd, this.wd);
     },
     /**
      * 获取区划
      */
     async getquhua() {
-      let params = {
-        app_id: "zwdtlzjmg",
-        interface_id: "yzzwbzwdtcxqhsj",
-        biz_content: {},
-      };
-      let res = await requestJPAAS(params);
-      let info = res.data;
+      let res = await getDistrictList();
+      let info = JSON.parse(res.data);
       if (info.code == 200 && info.success) {
-        this.qh = JSON.parse(info.data).data[0].children[0].children;
+        this.qh = [
+          info.data[0].children[0],
+          ...info.data[0].children[0].children,
+        ];
       }
     },
-    /**
-     * 获取网点信息
-     */
     /**
      * 关闭网点详情
      */
@@ -435,12 +484,12 @@ export default {
      */
     async handlesearch(searchValue) {
       if (!this.isSearchPage) {
-        this.infoName = searchValue;
-        this.infoType = "";
+        this.options.infoName = searchValue;
+        this.options.infoType = "";
         this.isSearchPage = !this.isSearchPage;
         this.getInfoList();
       } else {
-        this.infoName = searchValue;
+        this.options.infoName = searchValue;
         this.getInfoList();
       }
     },
@@ -471,40 +520,169 @@ export default {
      * 改变查询type
      */
     async changSearchType(item) {
-      this.searchType = item.type;
+      this.options.searchType = item.type;
       this.getInfoList();
     },
     /**
      * 选择区划
      */
-    xzqh(item) {
+    async xzqh(item, index) {
+      this.activeDistrict = index;
       this.activeQx = item;
-      this.provinceCode = item.key;
+      this.options.provinceCode = item.key;
     },
     /**
      * 关闭蒙层
      */
-    cloesMc() {
-      this.isShowMc = false;
+    cloesxzqhMc() {
+      this.isShowxzqhMc = false;
+    },
+
+    cloesxzjlMc() {
+      this.isShowxzjlMc = false;
     },
     /**
      * 打开蒙层
      */
-    openMc() {
-      this.isShowMc = true;
+    openxzqhMc() {
+      this.options.distance = "";
+      this.activeDisrance = 0;
+      this.activeDistanceValue = "";
+      this.isShowxzqhMc = true;
+    },
+    openxzjlMc() {
+      if (!this.branchDetails.centerName) {
+        this.$message("请先选中点位");
+        return;
+      }
+      this.isShowxzjlMc = true;
     },
     /**
      * 修改行政区划
      */
     changeQh() {
-      if (this.activeQx.title == "市辖区") {
-        this.provinceCode = "510700000000";
-        this.getInfoList();
-        this.isShowMc = false;
-      }
-      this.provinceCode = this.activeQx.key;
-      this.getInfoList();
       this.isShowMc = false;
+      this.cloesxzqhMc();
+      this.getInfoList();
+    },
+
+    /**从搜索页返回 */
+    ongoHome() {
+      this.options.infoName = "";
+      this.isSearchPage = false;
+      this.getInfoList();
+    },
+    /**
+     * 添加标注
+     */
+    addLables() {
+      if (this.leftInfo != null && this.leftInfo.length > 0) {
+        let jwdArr = [];
+        this.leftInfo.forEach((item) => {
+          let jwdObj = {
+            lng: item.lng,
+            lat: item.lat,
+            title: item.infoName,
+            iid: item.iid,
+            infoType: item.infoType,
+          };
+          jwdArr.push(jwdObj);
+        });
+        this.jwdArr = jwdArr;
+        this.jwdArr.forEach((item, index) => {
+          var marker = new T.Marker(new T.LngLat(item.lng, item.lat));
+          var content = item.title;
+          var placeId = item.iid;
+          var placeType = item.infoType;
+          this.tdtMap.addOverLay(marker);
+          this.addLablesClick(marker, content, item);
+        });
+      }
+    },
+    /**
+     * 监听标注点点击事件
+     */
+    addLablesClick(marker, content, item) {
+      var that = this;
+      marker.addEventListener("click", function (e) {
+        that.openLablesInfo(content, e, item);
+      });
+    },
+    /**
+     * 打开标注点详情
+     */
+    async openLablesInfo(content, e, item) {
+      var point = e.lnglat;
+      var marker = new T.Marker(point); // 创建标注
+      var markerInfoWin = new T.InfoWindow(content, {
+        offset: new T.Point(0, -30),
+      }); // 创建信息窗口对象
+      this.tdtMap.openInfoWindow(markerInfoWin, point); //开启信息窗口
+      let res = await getBranchDetail(item);
+      if (res.code == 200 && res.success) {
+        let info = JSON.parse(res.data).data.centerEntity;
+        this.handeleBranchDetails(info);
+      }
+    },
+    /**
+     * 修改距离
+     */
+    xzjl(item, index) {
+      this.options.distance = item.distance;
+      this.options.lng = this.branchDetails.lngAndLat.split(",")[0];
+      this.options.lat = this.branchDetails.lngAndLat.split(",")[1];
+      this.activeDisrance = index;
+      this.activeDistanceValue = item.value;
+    },
+    /**
+     * 修改距离
+     */
+    changeJl() {
+      this.isShowxzjlMc = false;
+      this.getInfoList();
+      let lng = this.branchDetails.lngAndLat.split(",")[0];
+      let lat = this.branchDetails.lngAndLat.split(",")[1];
+      var postion = new T.LngLat(lng, lat);
+      if (this.activeDistanceValue === "3km") {
+        this.tdtMap.panTo(postion, 15);
+      } else if (this.activeDistanceValue === "5km") {
+        this.tdtMap.panTo(postion, 12);
+      } else if (this.activeDistanceValue === "10km") {
+        this.tdtMap.panTo(postion, 11);
+      } else {
+        this.tdtMap.panTo(postion, 11);
+      }
+    },
+    /**
+     * 重置
+     */
+    async init() {
+      (this.activeName = "政务大厅"),
+        (this.activeDistanceValue = ""),
+        (this.activeQx = ""),
+        (this.activeDistrict = 0),
+        (this.activeDisrance = 0),
+        (this.branchDetails = ""),
+        (this.isShowDetail = false),
+        (this.isShowPlane = false),
+        (this.options = {
+          searchType: "place",
+          infoType: "",
+          provinceCode: "510700000000",
+          lng: "104.74",
+          lat: "31.47",
+          infoName: "",
+          distance: "",
+        });
+      this.getInfoList();
+      var postion = new T.LngLat(this.jd, this.wd);
+      this.tdtMap.panTo(postion, 8);
+    },
+    /**
+     * 去天地图
+     */
+    goTdt() {
+      window.open("https://map.tianditu.gov.cn/");
     },
   },
 };
@@ -520,54 +698,34 @@ export default {
 
 .box-card {
   position: absolute;
-  top: 20px;
+  top: 140px;
   left: 20px;
   width: 480px;
   height: 760px;
   background: #fff;
   box-shadow: 0 3px 12px #00000029;
-  .search {
-    display: flex;
-    width: 440px;
-    height: 40px;
-    border-radius: 8px;
-    background: #f4f4f4;
-    align-items: center;
-    justify-content: space-between;
-    padding-left: 12px;
-    .search_icon {
-      width: 20px;
-      height: 20px;
-      background: transparent;
-      background: url("../assets/images/search.png");
-    }
-    input {
-      flex: 1;
-      height: 40px;
-      border: none;
-      background: none;
-      margin-left: 10px;
-      outline: none;
-      font-weight: 400;
-      font-size: 14px;
-    }
-
-    .search_btn {
-      width: 60px;
-      height: 40px;
-      border-radius: 0 8px 8px 0;
-      background: #3875e1;
-      border: none;
-      color: #ffffff;
-      font-family: "Microsoft YaHei";
-      font-weight: 400;
-      font-size: 14px;
-      color: #fff;
-    }
+  .leftgoback {
+    width: 100px;
+    height: 30px;
+    margin-bottom: 10px;
   }
   .bsdtlist_header {
-    margin-top: 30px;
-
+    .bsdtList_top {
+      margin: 20px 0 20px 0;
+      display: flex;
+      justify-content: space-around;
+      .bsdtList_top_tbas {
+        min-width: 150px;
+        font-size: 16px;
+        line-height: 24px;
+        height: 24px;
+        border: 1px solid #3472e9;
+        border-radius: 5px;
+        cursor: pointer;
+        color: #3875e1;
+        padding: 0 10px;
+      }
+    }
     .bsdt_title {
       margin-right: 20px;
       font-weight: 700;
@@ -577,6 +735,9 @@ export default {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      .header_top {
+        height: 40px;
+      }
       .bsdt_title_icon {
         width: 22px;
         height: 22px;
@@ -661,11 +822,18 @@ export default {
         }
       }
     }
+    .dqzz {
+      padding-left: 30px;
+      text-align: left;
+      margin-top: 10px;
+      font-size: 14px;
+      color: #3472e9;
+    }
   }
 }
 .dt_detail {
   position: absolute;
-  top: 20px;
+  top: 140px;
   right: 20px;
   width: 480px;
   height: auto;
@@ -674,9 +842,25 @@ export default {
   .dt_detail_title {
     display: flex;
     justify-content: space-between;
+    align-items: flex-start;
     padding-right: 20px;
+    .dzlq {
+      display: flex;
+      color: #3472e9;
+      font-size: 16px;
+      align-items: center;
+      margin-right: 10px;
+      cursor: pointer;
+      .dzlq_icon {
+        margin-right: 5px;
+        width: 19px;
+        height: 19px;
+        background: url("../assets/images/dzlq.png");
+        background-size: 100%;
+      }
+    }
     .dt_card_name {
-      width: 300px;
+      width: 270px;
       font-weight: 700;
       font-size: 20px;
       line-height: 24px;
@@ -976,6 +1160,7 @@ export default {
   right: 0;
   background-color: rgba(0, 0, 0, 0.5);
   z-index: 1000;
+  .zxjl,
   .zxqh {
     display: flex;
     flex-wrap: wrap;
@@ -983,22 +1168,24 @@ export default {
     background: #fff;
     z-index: 1000;
     margin: 200px auto;
-    border-radius: 15px;
+    border-radius: 5px;
     padding: 20px;
     position: relative;
+    .jllist,
     .qxlist {
       display: flex;
       flex-wrap: wrap;
       width: 800px;
       margin: 20px auto 0;
-
       li {
-        height: 48px;
-        line-height: 48px;
         cursor: pointer;
         text-align: left;
-        font-size: 16px;
+        font-size: 14px;
         margin-right: 15px;
+        border: 1px solid #eee;
+        margin-bottom: 10px;
+        padding: 5px 10px;
+        border-radius: 5px;
       }
     }
     .xzqh {
@@ -1008,7 +1195,7 @@ export default {
       font-size: 16px;
       line-height: 16px;
       .xzqh_qxz {
-        font-weight: 700;
+        font-weight: 400;
         font-size: 16px;
       }
       span {
@@ -1030,6 +1217,10 @@ export default {
       line-height: 32px;
       border-radius: 8px;
       cursor: pointer;
+    }
+    .active {
+      background: #2b82f0;
+      color: #fff;
     }
   }
   .dqxz_title {
